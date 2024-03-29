@@ -1,90 +1,95 @@
-import express from "express";
+import express, { query } from "express";
 import bodyParser from "body-parser";
+import pg from "pg";
+import env from "dotenv";
+
+env.config();
+
+// Adding the database connection
+const db = new pg.Pool({
+  database: process.env.POSTGRES_DATABASE,
+  user: process.env.POSTGRES_USER,
+  password: process.env.POSTGRES_PASS,
+  host: process.env.POSTGRES_HOST,
+  port: process.env.POSTGRES_PORT,
+});
+db.connect();
 
 const app = express();
 const port = 4000;
-
-// In-memory data store
-let posts = [
-  {
-    id: 1,
-    title: "The Rise of Decentralized Finance",
-    content:
-      "Decentralized Finance (DeFi) is an emerging and rapidly evolving field in the blockchain industry. It refers to the shift from traditional, centralized financial systems to peer-to-peer finance enabled by decentralized technologies built on Ethereum and other blockchains. With the promise of reduced dependency on the traditional banking sector, DeFi platforms offer a wide range of services, from lending and borrowing to insurance and trading.",
-    author: "Alex Thompson",
-    date: "2023-08-01T10:00:00Z",
-  },
-  {
-    id: 2,
-    title: "The Impact of Artificial Intelligence on Modern Businesses",
-    content:
-      "Artificial Intelligence (AI) is no longer a concept of the future. It's very much a part of our present, reshaping industries and enhancing the capabilities of existing systems. From automating routine tasks to offering intelligent insights, AI is proving to be a boon for businesses. With advancements in machine learning and deep learning, businesses can now address previously insurmountable problems and tap into new opportunities.",
-    author: "Mia Williams",
-    date: "2023-08-05T14:30:00Z",
-  },
-  {
-    id: 3,
-    title: "Sustainable Living: Tips for an Eco-Friendly Lifestyle",
-    content:
-      "Sustainability is more than just a buzzword; it's a way of life. As the effects of climate change become more pronounced, there's a growing realization about the need to live sustainably. From reducing waste and conserving energy to supporting eco-friendly products, there are numerous ways we can make our daily lives more environmentally friendly. This post will explore practical tips and habits that can make a significant difference.",
-    author: "Samuel Green",
-    date: "2023-08-10T09:15:00Z",
-  },
-];
-
-let lastId = 3;
 
 // Middleware
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
 // GET all posts
-app.get("/posts", (req, res) => {
-  console.log(posts);
-  res.json(posts);
+app.get("/posts", async (req, res) => {
+  // Get all the posts from the database
+  try {
+    const results = await db.query("SELECT * FROM blogs");
+    console.log(results.rows);
+    res.json(results.rows);
+  } catch (error) {
+    console.error(error);
+    res.status(404).json({ message: "No posts found" });
+  }
 });
 
 // GET a specific post by id
-app.get("/posts/:id", (req, res) => {
-  const post = posts.find((p) => p.id === parseInt(req.params.id));
-  if (!post) return res.status(404).json({ message: "Post not found" });
-  res.json(post);
+app.get("/posts/:id", async (req, res) => {
+  // get specific post by id from the database
+  try {
+    const results = await db.query("SELECT * FROM blogs WHERE id = $1 ", [
+      req.params.id,
+    ]);
+    console.log(results.rows[0]);
+    res.json(results.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(404).json({ message: "Post not found" });
+  }
 });
 
 // POST a new post
-app.post("/posts", (req, res) => {
-  const newId = lastId += 1;
-  const post = {
-    id: newId,
-    title: req.body.title,
-    content: req.body.content,
-    author: req.body.author,
-    date: new Date(),
-  };
-  lastId = newId;
-  posts.push(post);
-  res.status(201).json(post);
+app.post("/posts", async (req, res) => {
+  try {
+    const date = new Date();
+    const addBlog = await db.query(
+      "INSERT INTO blogs (title, content, author, date) VALUES ($1,$2,$3,$4) RETURNING *",
+      [req.body.title, req.body.content, req.body.author, date]
+    );
+    console.log(addBlog.rows[0]);
+    res.status(201).json(addBlog.rows[0]);
+  } catch (error) {
+    console.error(error);
+  }
 });
 
 // PATCH a post when you just want to update one parameter
-app.patch("/posts/:id", (req, res) => {
-  const post = posts.find((p) => p.id === parseInt(req.params.id));
-  if (!post) return res.status(404).json({ message: "Post not found" });
-
-  if (req.body.title) post.title = req.body.title;
-  if (req.body.content) post.content = req.body.content;
-  if (req.body.author) post.author = req.body.author;
-
-  res.json(post);
+app.patch("/posts/:id", async (req, res) => {
+  console.log(req.body.content);
+  try {
+    const editedPost = await db.query(
+      "UPDATE blogs SET title = $1, content = $2, author = $3 WHERE id = $4 RETURNING *",
+      [req.body.title, req.body.content, req.body.author, req.params.id]
+    );
+    res.json(editedPost.rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(404).json({ message: "Post not found" });
+  }
 });
 
 // DELETE a specific post by providing the post id
-app.delete("/posts/:id", (req, res) => {
-  const index = posts.findIndex((p) => p.id === parseInt(req.params.id));
-  if (index === -1) return res.status(404).json({ message: "Post not found" });
-
-  posts.splice(index, 1);
-  res.json({ message: "Post deleted" });
+app.delete("/posts/:id", async (req, res) => {
+  try {
+    const deletePost = await db.query("DELETE FROM blogs WHERE id = $1", [
+      req.params.id,
+    ]);
+    res.json({ message: "Post deleted" });
+  } catch (error) {
+    res.status(404).json({ message: "Post not found" });
+  }
 });
 
 app.listen(port, () => {
